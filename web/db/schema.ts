@@ -23,6 +23,9 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   role: userRoleEnum("role").notNull().default("buyer"),
   kycStatus: kycStatusEnum("kyc_status").notNull().default("unstarted"),
+  kycProvider: text("kyc_provider"),
+  kycApplicantId: text("kyc_applicant_id"),
+  kycUpdatedAt: timestamp("kyc_updated_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -235,6 +238,23 @@ export const mediaAssets = pgTable("media_assets", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ---- KYC verification -------------------------------------------------
+
+// Every webhook received from the KYC vendor (or, in dev, every simulated
+// event) is recorded here — the audit trail a compliance reviewer needs to
+// see why an account's kyc_status changed and when.
+export const kycEvents = pgTable("kyc_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(), // "mock" | "sumsub"
+  eventType: text("event_type").notNull(), // e.g. applicantReviewed, dev-simulated
+  resultStatus: kycStatusEnum("result_status").notNull(),
+  rawPayload: text("raw_payload"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // ---- relations (for query API ergonomics) ---------------------------------
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -244,6 +264,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   orders: many(orders),
   notifications: many(notifications),
   mediaAssets: many(mediaAssets),
+  kycEvents: many(kycEvents),
 }));
 
 export const sellerProfilesRelations = relations(sellerProfiles, ({ one, many }) => ({

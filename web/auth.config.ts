@@ -33,7 +33,7 @@ export default {
       if (pathname.startsWith("/seller")) {
         return isLoggedIn && (role === "seller" || role === "admin");
       }
-      if (pathname === "/dashboard" || pathname === "/wallet" || pathname === "/messages" || pathname === "/notifications") {
+      if (pathname === "/dashboard" || pathname === "/wallet" || pathname === "/messages" || pathname === "/notifications" || pathname === "/signup") {
         return isLoggedIn;
       }
       return true;
