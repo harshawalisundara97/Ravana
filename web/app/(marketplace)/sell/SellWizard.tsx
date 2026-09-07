@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { ShieldCheck } from "lucide-react";
 
 const STEPS = ["Gem information", "Photographs & video", "Laboratory report", "Pricing & offers", "Shipping & returns", "Review & publish"];
@@ -14,8 +16,49 @@ const BLURBS = [
 ];
 
 export function SellWizard() {
+  const router = useRouter();
+  const { data: session } = useSession();
   const [step, setStep] = useState(1);
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const completeness = 62 + step * 6;
+
+  async function handlePublish() {
+    if (!session?.user) {
+      router.push("/login?callbackUrl=/sell");
+      return;
+    }
+    setPublishing(true);
+    setPublishError(null);
+    const res = await fetch("/api/gems", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Natural Ceylon Blue Sapphire",
+        type: "Sapphire",
+        carat: 2.15,
+        origin: "Sri Lanka — Ratnapura",
+        cut: "Oval mixed brilliant",
+        colour: "Royal Blue",
+        clarity: "VS — eye clean",
+        dimensions: "8.20 x 6.40 x 4.50 mm",
+        treatment: "Heated",
+        price: 2850,
+        offerFloor: 2500,
+        photos: ["/gems/gem-01.jpg", "/gems/gem-02.jpg", "/gems/gem-03.jpg"],
+        certLab: "GRS Swisslab",
+        certNumber: "GRS2026-041882",
+      }),
+    });
+    setPublishing(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setPublishError(body.error || "Could not publish this listing.");
+      return;
+    }
+    router.push("/seller/gems");
+    router.refresh();
+  }
 
   return (
     <main className="grid" style={{ gridTemplateColumns: "250px 1fr 330px" }}>
@@ -218,9 +261,14 @@ export function SellWizard() {
                 </tr>
               </tbody>
             </table>
-            <Link href="/seller/gems" className="btn btn-primary mt-5 inline-flex">
-              PUBLISH GEM
-            </Link>
+            {publishError && (
+              <div className="text-xs mb-3" style={{ color: "var(--color-accent)" }}>
+                {publishError}
+              </div>
+            )}
+            <button className="btn btn-primary mt-2 inline-flex" onClick={handlePublish} disabled={publishing}>
+              {publishing ? "PUBLISHING..." : "PUBLISH GEM"}
+            </button>
           </div>
         )}
 

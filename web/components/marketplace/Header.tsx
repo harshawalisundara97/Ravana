@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Search, ShoppingCart, User } from "lucide-react";
+import { Search, ShoppingCart } from "lucide-react";
 import { TrustStrip } from "./TrustStrip";
+import { AccountMenu } from "./AccountMenu";
 
 const NAV = [
   { href: "/explore", label: "Explore" },
@@ -30,9 +31,7 @@ export function Header({ cartCount = 2 }: { cartCount?: number }) {
             <Search size={14} strokeWidth={2} />
             <input placeholder="Search gems, sellers, IDs" className="bg-transparent outline-none text-sm w-full" />
           </div>
-          <Link href="/dashboard" className="btn btn-secondary">
-            <User size={14} strokeWidth={2} /> Account
-          </Link>
+          <AccountMenu />
           <Link href="/cart" className="btn btn-primary">
             <ShoppingCart size={14} strokeWidth={2} /> {cartCount}
           </Link>
