@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, numeric, primaryKey, pgEnum, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, timestamp, numeric, pgEnum, uuid } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 // ---- enums -----------------------------------------------------------
@@ -12,6 +12,7 @@ export const escrowStageEnum = pgEnum("escrow_stage", ["paid", "funded", "shippe
 export const disputeStatusEnum = pgEnum("dispute_status", ["open", "refunded", "released", "split", "second_opinion"]);
 export const kycStatusEnum = pgEnum("kyc_status", ["unstarted", "in_progress", "cleared", "rejected"]);
 export const networkEnum = pgEnum("network", ["TRC20", "ERC20", "BEP20"]);
+export const mediaAssetKindEnum = pgEnum("media_asset_kind", ["photo", "video", "document"]);
 
 // ---- users & sellers ---------------------------------------------------
 
@@ -71,6 +72,7 @@ export const gems = pgTable("gems", {
   video: text("video"),
   certLab: text("cert_lab").notNull(),
   certNumber: text("cert_number").notNull(),
+  certFileUrl: text("cert_file_url"),
   status: gemStatusEnum("status").notNull().default("draft"),
   views: integer("views").notNull().default(0),
   featured: boolean("featured").notNull().default(false),
@@ -213,6 +215,26 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ---- media & file uploads --------------------------------------------------
+
+// Every uploaded photo, video and PDF is tracked here regardless of which
+// storage driver (local disk in dev, S3/R2 in production) actually holds the
+// bytes — this is what lets an admin see upload provenance and lets us clean
+// up orphaned files if a listing is abandoned before publishing.
+export const mediaAssets = pgTable("media_assets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: uuid("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  kind: mediaAssetKindEnum("kind").notNull(),
+  storageKey: text("storage_key").notNull(),
+  url: text("url").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  originalName: text("original_name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // ---- relations (for query API ergonomics) ---------------------------------
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -221,6 +243,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   bids: many(bids),
   orders: many(orders),
   notifications: many(notifications),
+  mediaAssets: many(mediaAssets),
 }));
 
 export const sellerProfilesRelations = relations(sellerProfiles, ({ one, many }) => ({
@@ -249,4 +272,8 @@ export const messageThreadsRelations = relations(messageThreads, ({ one, many })
   buyer: one(users, { fields: [messageThreads.buyerId], references: [users.id] }),
   seller: one(sellerProfiles, { fields: [messageThreads.sellerId], references: [sellerProfiles.userId] }),
   messages: many(messages),
+}));
+
+export const mediaAssetsRelations = relations(mediaAssets, ({ one }) => ({
+  owner: one(users, { fields: [mediaAssets.ownerId], references: [users.id] }),
 }));

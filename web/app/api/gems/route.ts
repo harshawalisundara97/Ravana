@@ -32,9 +32,11 @@ export async function POST(req: Request) {
     price,
     offerFloor,
     photos,
+    video,
     certLab,
     certNumber,
-  } = body as Record<string, string | number | string[]>;
+    certFileUrl,
+  } = body as Record<string, string | number | string[] | undefined>;
 
   if (!title || !type || !carat || !price || !certLab || !certNumber) {
     return NextResponse.json({ error: "Missing required gem fields." }, { status: 400 });
@@ -59,8 +61,10 @@ export async function POST(req: Request) {
       priceMinorUnits: Math.round(Number(price) * 100),
       offerFloorMinorUnits: Math.round(Number(offerFloor ?? Number(price) * 0.85) * 100),
       photos: Array.isArray(photos) ? photos : [],
+      video: video ? String(video) : null,
       certLab: String(certLab),
       certNumber: String(certNumber),
+      certFileUrl: certFileUrl ? String(certFileUrl) : null,
       status: "in_review",
     })
     .returning();

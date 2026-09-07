@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { ShieldCheck } from "lucide-react";
+import { FileUpload } from "@/components/ui/FileUpload";
 
 const STEPS = ["Gem information", "Photographs & video", "Laboratory report", "Pricing & offers", "Shipping & returns", "Review & publish"];
 const BLURBS = [
@@ -21,6 +22,9 @@ export function SellWizard() {
   const [step, setStep] = useState(1);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [certFileUrl, setCertFileUrl] = useState<string | null>(null);
   const completeness = 62 + step * 6;
 
   async function handlePublish() {
@@ -45,9 +49,11 @@ export function SellWizard() {
         treatment: "Heated",
         price: 2850,
         offerFloor: 2500,
-        photos: ["/gems/gem-01.jpg", "/gems/gem-02.jpg", "/gems/gem-03.jpg"],
+        photos: photoUrls.filter(Boolean).length ? photoUrls.filter(Boolean) : ["/gems/gem-01.jpg", "/gems/gem-02.jpg", "/gems/gem-03.jpg"],
+        video: videoUrl ?? undefined,
         certLab: "GRS Swisslab",
         certNumber: "GRS2026-041882",
+        certFileUrl: certFileUrl ?? undefined,
       }),
     });
     setPublishing(false);
@@ -116,19 +122,25 @@ export function SellWizard() {
         {step === 2 && (
           <div>
             <div className="grid grid-cols-5 gap-3">
-              {["Main", "Side", "Back"].map((label, i) => (
-                <div key={label} className="aspect-square relative bg-cover bg-center grayscale-photo" style={{ backgroundImage: `url(/gems/gem-0${i + 1}.jpg)` }}>
-                  <span className="absolute bottom-2 left-2 uppercase text-[10px] tracking-wider font-semibold px-1.5 py-0.5" style={{ background: "var(--color-bg)" }}>
-                    {label}
-                  </span>
-                </div>
+              {[0, 1, 2].map((i) => (
+                <FileUpload
+                  key={i}
+                  kind="photo"
+                  label={["Main", "Side", "Back"][i]}
+                  hint="Drop image"
+                  accept="image/jpeg,image/png,image/webp"
+                  preview={photoUrls[i]}
+                  onUploaded={(url) =>
+                    setPhotoUrls((prev) => {
+                      const next = [...prev];
+                      next[i] = url;
+                      return next;
+                    })
+                  }
+                />
               ))}
-              {["Macro", "Video"].map((label, i) => (
-                <div key={label} className="aspect-square flex flex-col items-start justify-end p-2.5 gap-1" style={{ border: "2px dashed var(--color-divider)" }}>
-                  <span className="font-heading font-extrabold text-[13px]">{label}</span>
-                  <span className="text-[10.5px] opacity-55">{i === 0 ? "Drop image" : "360° turn, 15s"}</span>
-                </div>
-              ))}
+              <FileUpload kind="photo" label="Macro" hint="Drop image" accept="image/jpeg,image/png,image/webp" preview={photoUrls[3]} onUploaded={(url) => setPhotoUrls((prev) => { const next = [...prev]; next[3] = url; return next; })} />
+              <FileUpload kind="video" label="Video" hint="360° turn, 15s" accept="video/mp4,video/quicktime,video/webm" preview={undefined} onUploaded={setVideoUrl} />
             </div>
             <div className="note mt-5 max-w-[70ch]">Shoot on a neutral grey card in daylight, unretouched. Colour-corrected or saturated images are the single most common cause of disputes and can suspend a seller account.</div>
           </div>
@@ -145,12 +157,30 @@ export function SellWizard() {
               <input className="input" defaultValue="GRS2026-041882" />
             </div>
             <div className="field" style={{ gridColumn: "1/-1" }}>
-              <label>Report file</label>
-              <div className="flex justify-between items-center p-5.5" style={{ border: "2px dashed var(--color-divider)" }}>
-                <span className="text-[13px]">GRS2026-041882.pdf · 1.8 MB</span>
-                <span className="text-[11px] font-semibold tracking-wider uppercase" style={{ color: "var(--color-accent)" }}>
-                  Uploaded
-                </span>
+              <label>Report file (PDF)</label>
+              <div className="flex justify-between items-center p-4" style={{ border: "2px dashed var(--color-divider)" }}>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="text-[13px]"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append("file", file);
+                    formData.append("kind", "document");
+                    const res = await fetch("/api/upload", { method: "POST", body: formData });
+                    if (res.ok) {
+                      const body = await res.json();
+                      setCertFileUrl(body.url);
+                    }
+                  }}
+                />
+                {certFileUrl && (
+                  <span className="text-[11px] font-semibold tracking-wider uppercase" style={{ color: "var(--color-accent)" }}>
+                    Uploaded
+                  </span>
+                )}
               </div>
             </div>
             <div className="note" style={{ gridColumn: "1/-1" }}>
