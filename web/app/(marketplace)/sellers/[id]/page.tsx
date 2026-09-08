@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { getSeller, sellerGems } from "@/lib/data";
 import { getSellerById, getGemsBySeller } from "@/lib/queries";
 import { usdt } from "@/lib/format";
 import { GemGrid } from "@/components/marketplace/GemGrid";
@@ -12,9 +11,9 @@ const REVIEWS = [
 
 export default async function SellerProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const seller = getSeller(id) ?? (await getSellerById(id));
+  const seller = await getSellerById(id);
   if (!seller) notFound();
-  const gems = (id.startsWith("s") && id.length <= 3 ? sellerGems(seller.id) : await getGemsBySeller(seller.id)).slice(0, 4);
+  const gems = (await getGemsBySeller(seller.id)).slice(0, 4);
 
   return (
     <main>

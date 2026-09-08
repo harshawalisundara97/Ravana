@@ -1,18 +1,49 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Check } from "lucide-react";
 import type { Gem } from "@/lib/types";
 import { usdt } from "@/lib/format";
 import { Seg } from "@/components/ui/Seg";
+import { useCart } from "@/lib/cart";
 
 type PayState = "review" | "pending" | "done";
 type Network = "TRC20" | "ERC20" | "BEP20";
 
-export function CartClient({ initialGems }: { initialGems: Gem[] }) {
-  const [lines, setLines] = useState(initialGems);
+export function CartClient() {
+  const router = useRouter();
+  const { data: session } = useSession();
+  const { gemIds, remove, clear } = useCart();
+
+  const [lines, setLines] = useState<Gem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [pay, setPay] = useState<PayState>("review");
   const [network, setNetwork] = useState<Network>("TRC20");
+  const [error, setError] = useState<string | null>(null);
+  const [placedOrders, setPlacedOrders] = useState<{ id: string; amount: number }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!gemIds.length) {
+        setLines([]);
+        setLoading(false);
+        return;
+      }
+      const res = await fetch(`/api/gems/lookup?ids=${gemIds.join(",")}`);
+      const body = await res.json();
+      if (!cancelled) {
+        setLines(body.gems ?? []);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [gemIds]);
 
   const subtotal = lines.reduce((s, g) => s + g.price, 0);
   const shipping = lines.length ? 45 : 0;
@@ -20,30 +51,65 @@ export function CartClient({ initialGems }: { initialGems: Gem[] }) {
   const total = +(subtotal + shipping + escrowFee).toFixed(2);
   const sellerCount = new Set(lines.map((g) => g.sellerId)).size;
 
+  async function placeOrder() {
+    if (!session?.user) {
+      router.push("/login?callbackUrl=/cart");
+      return;
+    }
+    setError(null);
+    const res = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gemIds: lines.map((g) => g.id), network }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Could not place this order.");
+      return;
+    }
+    const body = await res.json();
+    setPlacedOrders(body.orders);
+    setPay("pending");
+  }
+
+  async function confirmFunding() {
+    // Escrow funding is simulated until custody is wired (Phase B3): we
+    // advance each order past "paid" rather than waiting on a chain watcher.
+    for (const order of placedOrders) {
+      await fetch(`/api/orders/${order.id}/advance`, { method: "POST" });
+    }
+    clear();
+    setPay("done");
+  }
+
   return (
     <main className="grid" style={{ gridTemplateColumns: "1fr 420px" }}>
       <section className="border-r-2 px-8 pt-6.5 pb-16" style={{ borderColor: "var(--color-divider)" }}>
         <h1 className="mb-1">Cart</h1>
         <p className="text-[13px] opacity-60 mb-5.5">
-          {lines.length} {lines.length === 1 ? "stone" : "stones"} from {sellerCount} {sellerCount === 1 ? "seller" : "sellers"}. Each seller&apos;s parcel ships and settles separately.
+          {loading
+            ? "Loading your cart…"
+            : lines.length
+              ? `${lines.length} ${lines.length === 1 ? "stone" : "stones"} from ${sellerCount} ${sellerCount === 1 ? "seller" : "sellers"}. Each seller's parcel ships and settles separately.`
+              : "Your cart is empty."}
         </p>
 
         <div className="border-t-2" style={{ borderColor: "var(--color-divider)" }}>
           {lines.map((g) => (
             <div key={g.id} className="grid gap-4.5 py-4.5 border-b items-center" style={{ gridTemplateColumns: "88px 1fr auto", borderColor: "var(--color-divider)" }}>
-              <div className="w-[88px] h-[88px] bg-cover bg-center grayscale-photo" style={{ backgroundImage: `url(${g.photos[0]})` }} />
+              <div className="w-[88px] h-[88px] bg-cover bg-center" style={{ backgroundImage: `url(${g.photos[0]})` }} />
               <div>
                 <div className="font-heading font-extrabold text-base mb-1">{g.title}</div>
                 <div className="text-xs opacity-60 mb-2">
                   {g.carat} ct · {g.origin} · {g.treatment}
                 </div>
                 <div className="flex gap-3.5 text-[11.5px]">
-                  <button className="bg-transparent border-0 p-0 cursor-pointer" style={{ color: "var(--color-accent)" }} onClick={() => setLines((prev) => prev.filter((x) => x.id !== g.id))}>
-                    Remove
-                  </button>
-                  <button className="bg-transparent border-0 p-0 cursor-pointer" style={{ color: "var(--color-accent)" }}>
-                    Save for later
-                  </button>
+                  <span className="opacity-60">{g.sellerName}</span>
+                  {pay === "review" && (
+                    <button className="bg-transparent border-0 p-0 cursor-pointer" style={{ color: "var(--color-accent)" }} onClick={() => remove(g.id)}>
+                      Remove
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="text-right">
@@ -52,38 +118,36 @@ export function CartClient({ initialGems }: { initialGems: Gem[] }) {
               </div>
             </div>
           ))}
-          {lines.length === 0 && <div className="py-10 text-center opacity-60">Your cart is empty. <Link href="/explore">Browse gems</Link></div>}
+          {!loading && lines.length === 0 && (
+            <div className="py-10 text-center opacity-60">
+              Nothing here yet. <Link href="/explore">Browse gems</Link>
+            </div>
+          )}
         </div>
 
-        <h3 className="label-section !text-xs mt-8 mb-3">Shipping</h3>
-        <div className="grid grid-cols-2 gap-3.5">
-          <div className="field">
-            <label>Recipient</label>
-            <input className="input" defaultValue="A. Fernando" />
-          </div>
-          <div className="field">
-            <label>Destination</label>
-            <input className="input" defaultValue="New York, United States" />
-          </div>
-          <div className="field">
-            <label>Carrier</label>
-            <input className="input" defaultValue="FedEx Priority — insured to 25,000 USDT" />
-          </div>
-          <div className="field">
-            <label>Declared value</label>
-            <input className="input" readOnly value={`${usdt(subtotal)} USDT`} />
-          </div>
-        </div>
-        <div className="flex gap-3 mt-4 text-[13px]">
-          <label className="radio">
-            <input type="radio" name="ship" defaultChecked /> <span className="dot" />
-            Insured courier — 45 USDT
-          </label>
-          <label className="radio">
-            <input type="radio" name="ship" /> <span className="dot" />
-            Hand delivery at Colombo office — free
-          </label>
-        </div>
+        {lines.length > 0 && (
+          <>
+            <h3 className="label-section !text-xs mt-8 mb-3">Shipping</h3>
+            <div className="grid grid-cols-2 gap-3.5">
+              <div className="field">
+                <label>Recipient</label>
+                <input className="input" defaultValue={session?.user?.name ?? ""} />
+              </div>
+              <div className="field">
+                <label>Destination</label>
+                <input className="input" placeholder="City, country" />
+              </div>
+              <div className="field">
+                <label>Carrier</label>
+                <input className="input" defaultValue="FedEx Priority — insured to 25,000 USDT" />
+              </div>
+              <div className="field">
+                <label>Declared value</label>
+                <input className="input" readOnly value={`${usdt(subtotal)} USDT`} />
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <aside className="px-7 pt-6.5 pb-16 relative">
@@ -126,9 +190,15 @@ export function CartClient({ initialGems }: { initialGems: Gem[] }) {
           />
         </div>
 
+        {error && (
+          <div className="text-xs mb-3" style={{ color: "var(--color-accent)" }}>
+            {error}
+          </div>
+        )}
+
         {pay === "review" && (
           <div>
-            <button className="btn btn-primary w-full justify-between text-left" style={{ padding: "16px 20px" }} disabled={lines.length === 0} onClick={() => setPay("pending")}>
+            <button className="btn btn-primary w-full justify-between text-left" style={{ padding: "16px 20px" }} disabled={lines.length === 0} onClick={placeOrder}>
               PAY WITH USDT <span>→</span>
             </button>
             <div className="text-[11.5px] opacity-60 leading-relaxed mt-3">Funds go to RavanaGems escrow, not to the sellers. Released only after you confirm each parcel.</div>
@@ -141,23 +211,17 @@ export function CartClient({ initialGems }: { initialGems: Gem[] }) {
               <span className="text-[11px] tracking-[.14em] uppercase font-semibold" style={{ color: "var(--color-accent)" }}>
                 Awaiting transfer
               </span>
-              <span className="font-heading font-extrabold text-[15px]">14:32</span>
             </div>
-            <div className="flex gap-4 items-start">
-              <div className="w-[112px] h-[112px] flex-none p-2 bg-white" style={{ border: "1px solid var(--color-divider)" }}>
-                <div className="w-full h-full" style={{ backgroundImage: "repeating-conic-gradient(#201e1d 0% 25%, #fff 0% 50%)", backgroundSize: "9px 9px" }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="label-micro mb-1">Send exactly</div>
-                <div className="font-heading font-extrabold text-[22px] mb-2.5">{usdt(total)} USDT</div>
-                <div className="label-micro mb-1">{network} address</div>
-                <div className="text-xs break-all leading-relaxed p-2" style={{ background: "var(--color-surface)" }}>
-                  TXk9mQ4pV2sB7hL1nR6yD3wZ8cF5aJ0eUt
-                </div>
-              </div>
+            <div className="label-micro mb-1">Send exactly</div>
+            <div className="font-heading font-extrabold text-[22px] mb-2.5">{usdt(total)} USDT</div>
+            <div className="label-micro mb-1">{network} address</div>
+            <div className="text-xs break-all leading-relaxed p-2" style={{ background: "var(--color-surface)" }}>
+              {placedOrders.length === 1 ? "One address per order — see order page" : `${placedOrders.length} orders created, one address each`}
             </div>
-            <div className="text-[11.5px] opacity-60 leading-relaxed my-3.5">Single-use address for this order. Sending on another network will lose the funds.</div>
-            <button className="btn btn-primary w-full text-left" style={{ padding: "14px 18px" }} onClick={() => setPay("done")}>
+            <div className="note my-3.5">
+              Custody is not yet connected, so no real transfer is expected. Confirming below simulates the chain watcher seeing your deposit and funds the escrow.
+            </div>
+            <button className="btn btn-primary w-full text-left" style={{ padding: "14px 18px" }} onClick={confirmFunding}>
               I&apos;VE SENT THE PAYMENT
             </button>
           </div>
@@ -167,18 +231,16 @@ export function CartClient({ initialGems }: { initialGems: Gem[] }) {
           <div className="p-4.5" style={{ border: "2px solid var(--color-accent)" }}>
             <div className="flex gap-2 items-center mb-3">
               <Check size={18} strokeWidth={3} color="var(--color-accent)" />
-              <span className="font-heading font-extrabold text-[17px]">Payment detected</span>
+              <span className="font-heading font-extrabold text-[17px]">Escrow funded</span>
             </div>
-            <div className="text-[12.5px] leading-relaxed opacity-80 mb-3.5">19 of 19 confirmations. {usdt(total)} USDT is held in escrow. All sellers have been cleared to ship.</div>
-            <div className="text-[11px] break-all p-2 mb-3.5" style={{ background: "var(--color-surface)" }}>
-              Tx 0x9f2a…c41b · {network} · 30 Aug 2026 11:04 UTC
+            <div className="text-[12.5px] leading-relaxed opacity-80 mb-3.5">
+              {placedOrders.length} {placedOrders.length === 1 ? "order is" : "orders are"} funded and the {placedOrders.length === 1 ? "seller has" : "sellers have"} been cleared to ship.
             </div>
-            <Link href="/escrow/o1" className="btn btn-primary w-full text-left block">
-              TRACK THIS ORDER
-            </Link>
-            <button className="btn btn-secondary w-full text-left mt-2" onClick={() => setPay("review")}>
-              RESET DEMO
-            </button>
+            {placedOrders.map((o) => (
+              <Link key={o.id} href={`/escrow/${o.id}`} className="btn btn-primary w-full text-left block mb-2">
+                TRACK ORDER · {usdt(o.amount)} USDT
+              </Link>
+            ))}
           </div>
         )}
       </aside>

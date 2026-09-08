@@ -6,7 +6,10 @@ import { usdt } from "@/lib/format";
 import { PhotoPlate, CaptionChip } from "./PhotoPlate";
 
 export function GemCard({ gem }: { gem: Gem }) {
-  const seller = getSeller(gem.sellerId);
+  // Real listings carry the seller name from the join; the remaining
+  // mock-backed screens fall back to the fixture lookup.
+  const sellerName = gem.sellerName ?? getSeller(gem.sellerId)?.name;
+
   return (
     <Link href={`/gems/${gem.id}`} className="flex flex-col text-left no-underline" style={{ color: "var(--color-text)" }}>
       <PhotoPlate
@@ -16,6 +19,8 @@ export function GemCard({ gem }: { gem: Gem }) {
             <CaptionChip>Lot {gem.auction.lotNumber} of {gem.auction.lotsTotal}</CaptionChip>
           ) : gem.status === "sold" ? (
             <CaptionChip>Sold</CaptionChip>
+          ) : gem.status === "reserved" ? (
+            <CaptionChip>Reserved</CaptionChip>
           ) : undefined
         }
       />
@@ -28,9 +33,9 @@ export function GemCard({ gem }: { gem: Gem }) {
           <span className="text-[18px] font-extrabold">{usdt(gem.price)}</span>{" "}
           <span className="text-[11px] tracking-wider opacity-55">USDT</span>
         </p>
-        {seller && (
+        {sellerName && (
           <p className="flex items-center gap-1 text-[11.5px] opacity-70 m-0">
-            <ShieldCheck size={13} strokeWidth={2.4} /> {seller.name}
+            <ShieldCheck size={13} strokeWidth={2.4} /> {sellerName}
           </p>
         )}
       </div>

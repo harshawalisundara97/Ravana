@@ -1,11 +1,17 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ShieldCheck, ArrowRight } from "lucide-react";
 import type { Gem, Seller } from "@/lib/types";
 import { usdt } from "@/lib/format";
+import { useCart } from "@/lib/cart";
 
 export function GemDetailClient({ gem, seller }: { gem: Gem; seller: Seller }) {
+  const router = useRouter();
+  const { add, gemIds } = useCart();
+  const inCart = gemIds.includes(gem.id);
+  const soldOut = gem.status !== "live";
   const [offerOpen, setOfferOpen] = useState(false);
   const [activeThumb, setActiveThumb] = useState(0);
   const [offerAmount, setOfferAmount] = useState(gem.offerFloor);
@@ -91,15 +97,28 @@ export function GemDetailClient({ gem, seller }: { gem: Gem; seller: Seller }) {
           </div>
 
           <div className="flex flex-col gap-2.5">
-            <Link href="/cart" className="btn btn-primary justify-between text-left" style={{ padding: "16px 20px" }}>
-              BUY NOW <span>{usdt(gem.price)} USDT</span>
-            </Link>
-            <button onClick={() => setOfferOpen((v) => !v)} className="btn btn-secondary text-left" style={{ padding: "15px 20px" }}>
+            <button
+              className="btn btn-primary justify-between text-left"
+              style={{ padding: "16px 20px" }}
+              disabled={soldOut}
+              onClick={() => {
+                add(gem.id);
+                router.push("/cart");
+              }}
+            >
+              {soldOut ? "NO LONGER AVAILABLE" : "BUY NOW"} {!soldOut && <span>{usdt(gem.price)} USDT</span>}
+            </button>
+            <button onClick={() => setOfferOpen((v) => !v)} className="btn btn-secondary text-left" style={{ padding: "15px 20px" }} disabled={soldOut}>
               MAKE AN OFFER
             </button>
-            <Link href="/cart" className="btn btn-secondary text-left" style={{ padding: "15px 20px" }}>
-              ADD TO CART
-            </Link>
+            <button
+              className="btn btn-secondary text-left"
+              style={{ padding: "15px 20px" }}
+              disabled={soldOut || inCart}
+              onClick={() => add(gem.id)}
+            >
+              {inCart ? "IN YOUR CART" : "ADD TO CART"}
+            </button>
           </div>
 
           {offerOpen && (

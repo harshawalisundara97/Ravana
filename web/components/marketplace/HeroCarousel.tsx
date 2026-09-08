@@ -27,7 +27,7 @@ export function HeroCarousel({ slides }: { slides: Gem[] }) {
         style={{ background: "linear-gradient(transparent, rgba(32,30,29,.65))" }}
       >
         <span>{slides[idx].title}</span>
-        <span>Lot {slides[idx].id.replace("g", "")}</span>
+        <span>{slides[idx].marketplaceId}</span>
       </div>
     </div>
   );

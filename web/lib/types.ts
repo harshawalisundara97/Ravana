@@ -38,6 +38,8 @@ export interface Gem {
   certLab: string;
   certNumber: string;
   sellerId: string;
+  sellerName?: string;
+  sellerVerified?: boolean;
   status: GemStatus;
   views: number;
   offers: number;

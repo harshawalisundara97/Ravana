@@ -1,18 +1,24 @@
 import Link from "next/link";
-import { ShieldCheck, ArrowRight } from "lucide-react";
-import { gems } from "@/lib/data";
+import { ArrowRight } from "lucide-react";
 import { usdt } from "@/lib/format";
 import { HeroCarousel } from "@/components/marketplace/HeroCarousel";
 import { GemGrid } from "@/components/marketplace/GemGrid";
-import { getSeller } from "@/lib/data";
+import { getPublicGems } from "@/lib/queries";
+
+// The catalogue changes whenever a seller publishes, so this page must not
+// be prerendered at build time. (An ISR revalidate window would be the
+// performance-minded choice once there is real traffic.)
+export const dynamic = "force-dynamic";
 
 const CATEGORIES = ["Sapphire", "Ruby", "Emerald", "Spinel", "Garnet", "Tourmaline", "Aquamarine", "Topaz", "Alexandrite", "Chrysoberyl", "Zircon"];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const gems = await getPublicGems();
   const heroSlides = gems.slice(0, 3);
-  const trending = gems.filter((g) => g.featured).slice(0, 4);
+  const trending = (gems.filter((g) => g.featured).length ? gems.filter((g) => g.featured) : gems).slice(0, 4);
   const liveAuction = gems.find((g) => g.auction);
-  const auctionSeller = liveAuction ? getSeller(liveAuction.sellerId) : undefined;
+  const verifiedSellerCount = new Set(gems.filter((g) => g.sellerVerified).map((g) => g.sellerId)).size;
+  const settledTotal = gems.filter((g) => g.status === "sold").reduce((sum, g) => sum + g.price, 0);
 
   return (
     <main>
@@ -34,18 +40,22 @@ export default function HomePage() {
             </Link>
           </div>
         </div>
-        <HeroCarousel slides={heroSlides} />
+        {heroSlides.length > 0 ? (
+          <HeroCarousel slides={heroSlides} />
+        ) : (
+          <div style={{ minHeight: 520, background: "var(--color-neutral-900)" }} />
+        )}
       </section>
 
       <section className="grid grid-cols-4 border-b-2" style={{ borderColor: "var(--color-divider)" }}>
         {[
-          ["41,208", "Gems listed"],
-          ["3,182", "Verified sellers"],
-          ["12.4M", "USDT settled"],
-          ["98.7%", "Positive feedback"],
+          [gems.length.toLocaleString("en-US"), "Gems listed"],
+          [String(verifiedSellerCount), "Verified sellers"],
+          [usdt(settledTotal), "USDT settled"],
+          ["100%", "Escrow protected"],
         ].map(([num, label], i) => (
           <div key={label} className="px-8 py-5" style={{ borderRight: i < 3 ? "1px solid var(--color-divider)" : undefined }}>
-            <div className="font-heading font-extrabold text-[30px] tracking-tight" style={{ color: label === "Positive feedback" ? "var(--color-accent)" : undefined }}>
+            <div className="font-heading font-extrabold text-[30px] tracking-tight" style={{ color: label === "Escrow protected" ? "var(--color-accent)" : undefined }}>
               {num}
             </div>
             <div className="text-[11px] tracking-[.12em] uppercase opacity-60 mt-1">{label}</div>
@@ -82,7 +92,7 @@ export default function HomePage() {
         <div className="flex items-baseline justify-between px-8 pt-6 pb-4">
           <h2 className="m-0">Trending this week</h2>
           <Link href="/explore" className="btn-ghost text-[13px] font-extrabold no-underline" style={{ fontFamily: "var(--font-heading)" }}>
-            VIEW ALL 41,208 →
+            VIEW ALL {gems.length} →
           </Link>
         </div>
         <GemGrid gems={trending} cols={4} />
@@ -122,7 +132,7 @@ export default function HomePage() {
                 PLACE BID
               </Link>
               <Link href="/explore?auction=1" className="btn btn-secondary" style={{ padding: "13px 20px" }}>
-                ALL 38 LOTS
+                ALL LOTS
               </Link>
             </div>
           </div>
