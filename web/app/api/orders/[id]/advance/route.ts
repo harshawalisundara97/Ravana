@@ -55,7 +55,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     await tx.insert(orderActivity).values({ orderId: id, event: transition.event, tag: transition.tag });
 
     if (transition.next === "funded") {
-      // The hold is now good funds sitting in escrow.
+      // Record the incoming transfer that paid for this order, then confirm
+      // the hold against it. Deposit and hold net to zero on the buyer's
+      // available balance, leaving the money visible as an escrow position
+      // instead. With real custody this deposit row is exactly what the
+      // chain watcher writes once it sees the transaction confirm.
+      await tx.insert(ledgerEntries).values({
+        userId: order.buyerId,
+        orderId: id,
+        type: "deposit",
+        amountMinorUnits: order.amountMinorUnits,
+        network: order.network,
+        status: "confirmed",
+      });
       await tx
         .update(ledgerEntries)
         .set({ status: "confirmed" })

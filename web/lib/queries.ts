@@ -12,6 +12,7 @@ import {
   orders as ordersTable,
   orderActivity,
   ledgerEntries,
+  offers,
 } from "@/db/schema";
 import type { Gem, Seller, Order, EscrowStage } from "./types";
 
@@ -216,3 +217,181 @@ export async function getOrdersForSeller(sellerId: string): Promise<Order[]> {
 }
 
 export { ESCROW_STAGES };
+
+// ---- wallet & dashboard ----------------------------------------------
+
+// Balances are always derived from the ledger, never stored on the user row.
+// That means a balance can be recomputed from history at any point, and a bug
+// in one posting can't silently corrupt a stored number.
+export interface WalletTx {
+  id: string;
+  createdAt: string;
+  type: string;
+  orderId: string | null;
+  reference: string;
+  network: string | null;
+  amount: number;
+  status: string;
+}
+
+export interface WalletSummary {
+  available: number;
+  inEscrow: number;
+  clearing: number;
+  lifetimeWithdrawn: number;
+  transactions: WalletTx[];
+}
+
+const IN_FLIGHT_STAGES = ["paid", "funded", "shipped", "delivered"] as const;
+
+export async function getWalletSummary(userId: string): Promise<WalletSummary> {
+  const [entries, buying, selling] = await Promise.all([
+    db
+      .select()
+      .from(ledgerEntries)
+      .where(eq(ledgerEntries.userId, userId))
+      .orderBy(desc(ledgerEntries.createdAt)),
+    db
+      .select()
+      .from(ordersTable)
+      .where(and(eq(ordersTable.buyerId, userId), inArray(ordersTable.escrowStage, IN_FLIGHT_STAGES))),
+    db
+      .select()
+      .from(ordersTable)
+      .where(and(eq(ordersTable.sellerId, userId), inArray(ordersTable.escrowStage, IN_FLIGHT_STAGES))),
+  ]);
+
+  const sumWhere = (fn: (e: (typeof entries)[number]) => boolean) =>
+    entries.filter(fn).reduce((total, e) => total + e.amountMinorUnits, 0);
+
+  // Money the buyer has committed, plus what the seller is owed once each
+  // order releases (net of commission, since that never reaches them).
+  const escrowAsBuyer = buying.reduce((total, o) => total + o.amountMinorUnits, 0);
+  const escrowAsSeller = selling.reduce(
+    (total, o) => total + (o.amountMinorUnits - Math.round((o.amountMinorUnits * o.commissionBps) / 10000)),
+    0
+  );
+
+  // Titles for the reference column, fetched in one go.
+  const orderIds = [...new Set(entries.map((e) => e.orderId).filter((id): id is string => !!id))];
+  const orderRows = orderIds.length
+    ? await db
+        .select({ id: ordersTable.id, title: gemsTable.title })
+        .from(ordersTable)
+        .innerJoin(gemsTable, eq(gemsTable.id, ordersTable.gemId))
+        .where(inArray(ordersTable.id, orderIds))
+    : [];
+  const titleByOrder = new Map(orderRows.map((r) => [r.id, r.title]));
+
+  return {
+    available: sumWhere((e) => e.status === "confirmed") / 100,
+    inEscrow: (escrowAsBuyer + escrowAsSeller) / 100,
+    clearing: sumWhere((e) => e.status === "pending") / 100,
+    lifetimeWithdrawn: Math.abs(sumWhere((e) => e.type === "withdrawal" && e.status === "confirmed")) / 100,
+    transactions: entries.map((e) => ({
+      id: e.id,
+      createdAt: e.createdAt.toISOString(),
+      type: e.type,
+      orderId: e.orderId,
+      reference: e.orderId ? (titleByOrder.get(e.orderId) ?? e.orderId.slice(0, 8)) : "—",
+      network: e.network,
+      amount: e.amountMinorUnits / 100,
+      status: e.status,
+    })),
+  };
+}
+
+export interface DashboardOrder {
+  id: string;
+  gemTitle: string;
+  gemId: string;
+  amount: number;
+  stage: EscrowStage;
+  stageLabel: string;
+}
+
+const STAGE_LABELS = ["Awaiting funding", "In escrow", "Shipped", "Delivered", "Completed"];
+
+export async function getBuyerOrders(buyerId: string): Promise<DashboardOrder[]> {
+  const rows = await db
+    .select({
+      id: ordersTable.id,
+      gemId: ordersTable.gemId,
+      gemTitle: gemsTable.title,
+      amountMinorUnits: ordersTable.amountMinorUnits,
+      escrowStage: ordersTable.escrowStage,
+    })
+    .from(ordersTable)
+    .innerJoin(gemsTable, eq(gemsTable.id, ordersTable.gemId))
+    .where(eq(ordersTable.buyerId, buyerId))
+    .orderBy(desc(ordersTable.createdAt));
+
+  return rows.map((r) => {
+    const stage = ESCROW_STAGES.indexOf(r.escrowStage) as EscrowStage;
+    return {
+      id: r.id,
+      gemId: r.gemId,
+      gemTitle: r.gemTitle,
+      amount: r.amountMinorUnits / 100,
+      stage,
+      stageLabel: STAGE_LABELS[stage],
+    };
+  });
+}
+
+export interface DashboardOffer {
+  id: string;
+  gemId: string;
+  gemTitle: string;
+  sellerName: string;
+  amount: number;
+  status: string;
+  createdAt: string;
+}
+
+export async function getBuyerOffers(buyerId: string): Promise<DashboardOffer[]> {
+  const rows = await db
+    .select({
+      id: offers.id,
+      gemId: offers.gemId,
+      gemTitle: gemsTable.title,
+      sellerName: sellerProfiles.displayName,
+      amountMinorUnits: offers.amountMinorUnits,
+      status: offers.status,
+      createdAt: offers.createdAt,
+    })
+    .from(offers)
+    .innerJoin(gemsTable, eq(gemsTable.id, offers.gemId))
+    .innerJoin(sellerProfiles, eq(sellerProfiles.userId, gemsTable.sellerId))
+    .where(eq(offers.buyerId, buyerId))
+    .orderBy(desc(offers.createdAt));
+
+  return rows.map((r) => ({
+    id: r.id,
+    gemId: r.gemId,
+    gemTitle: r.gemTitle,
+    sellerName: r.sellerName,
+    amount: r.amountMinorUnits / 100,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+// Everything the buyer dashboard needs, in one round of queries.
+export async function getBuyerDashboard(userId: string) {
+  const [wallet, orders, offerRows] = await Promise.all([
+    getWalletSummary(userId),
+    getBuyerOrders(userId),
+    getBuyerOffers(userId),
+  ]);
+
+  const collectionValue = orders.filter((o) => o.stage === 4).reduce((total, o) => total + o.amount, 0);
+
+  return {
+    wallet,
+    orders,
+    offers: offerRows,
+    pendingOffers: offerRows.filter((o) => o.status === "pending").length,
+    collectionValue,
+  };
+}
